@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "*/30 * * * *"   # mỗi 30 phút: đọc lệnh Telegram, tra giá chuyến đến hạn
   workflow_dispatch:
+  push:                       # chạy ngay khi cập nhật code
+    branches: [main]
+    paths: ["watch.js", ".github/workflows/**"]
 
 concurrency:
   group: canh-ve
