@@ -1,4 +1,4 @@
-// Canh vé rẻ: kiểm tra giá vé máy bay theo lịch và báo qua Telegram.
+// Canh vé rẻ: kiểm tra giá vé máy bay theo lịch và báo qua Telegram (@sanve_bacnam_bot).
 // Chạy: node watch.js   (GitHub Actions gọi mỗi 30 phút)
 // Biến môi trường:
 //   TELEGRAM_BOT_TOKEN  token bot lấy từ @BotFather (bắt buộc)
