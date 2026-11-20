@@ -205,7 +205,10 @@ async function main() {
   if (!MOCK && (!TG || !SERP)) { console.error('Thiếu TELEGRAM_BOT_TOKEN hoặc SERPAPI_KEY'); process.exit(1); }
   const state = loadState();
   // 1) đọc lệnh mới từ Telegram
+  if (!MOCK && !state.bot) { const me = await tg('getMe', {}); state.bot = me.ok ? '@' + me.result.username : null; }
   const up = MOCK ? { result: JSON.parse(ENV.MOCK_UPDATES || '[]') } : await tg('getUpdates', { offset: state.tgOffset, timeout: 0 });
+  state.tgStatus = up.ok === false ? `lỗi Telegram: ${up.error_code} ${up.description}` : 'ok';
+  if (up.ok === false) console.error(state.tgStatus);
   for (const u of up.result || []) {
     state.tgOffset = u.update_id + 1;
     if (u.message) { try { await handle(state, u.message); } catch (e) { console.error(e); } }
