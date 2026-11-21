@@ -84,8 +84,13 @@ function flightsOf(res) {
 // Tìm chuyến rẻ bất thường:
 //  (a) rẻ hơn giá thường ngày của chính chuyến đó (trung vị các lần tra trước) ít nhất DROP
 //  (b) rẻ hơn chuyến rẻ kế tiếp của các hãng bay cùng khung giờ (±2 tiếng) ít nhất DROP
+//  (c) thấp hơn khoảng giá thường của Google Flights cho chặng này
+// Luật (b) bị bỏ qua nếu giá vẫn cao hơn khoảng giá thường của Google: rẻ nhất trong một ngày
+// giá cao thì chưa phải vé rẻ.
 function findDeals(w, flights, insights) {
   const deals = [];
+  const tr = insights && insights.typical_price_range;
+  const [typLow, typHigh] = Array.isArray(tr) && tr.length === 2 ? tr : [null, null];
   for (const f of flights) {
     const past = (w.hist[f.key] || []).map(p => p[1]);
     const own = past.length >= 3 ? median(past) : null;
@@ -95,7 +100,8 @@ function findDeals(w, flights, insights) {
     const slot = peers.length >= 2 ? Math.min(...peers) : null;
     const reasons = [];
     if (own && f.price <= own * (1 - DROP)) reasons.push(`rẻ hơn ${Math.round((1 - f.price / own) * 100)}% so với giá thường của chuyến này (~${vnd(own)})`);
-    if (slot && f.price <= slot * (1 - DROP)) reasons.push(`rẻ hơn ${Math.round((1 - f.price / slot) * 100)}% so với chuyến rẻ kế tiếp cùng khung giờ (${vnd(slot)})`);
+    if (typLow && f.price < typLow) reasons.push(`thấp hơn khoảng giá thường của Google Flights (${vnd(typLow)} – ${vnd(typHigh)})`);
+    if (slot && f.price <= slot * (1 - DROP) && !(typHigh && f.price > typHigh)) reasons.push(`rẻ hơn ${Math.round((1 - f.price / slot) * 100)}% so với chuyến rẻ kế tiếp cùng khung giờ (${vnd(slot)})`);
     if (!reasons.length) continue;
     const last = w.alerted[f.key];
     if (last && f.price >= last * 0.97) continue; // đã báo giá này rồi, chỉ báo lại nếu giảm tiếp
