@@ -62,7 +62,8 @@ const send = (chat, text) => tg('sendMessage', { chat_id: chat, text, parse_mode
 const NIGHT_FROM = Number(ENV.NIGHT_FROM || 19);
 const NIGHT_TO = Number(ENV.NIGHT_TO || 6);
 const nextDay = iso => new Date(Date.parse(iso + 'T00:00:00Z') + 86400e3).toISOString().slice(0, 10);
-const inNight = (w, f) => f.date === w.date ? f.hour >= NIGHT_FROM : f.hour < NIGHT_TO;
+const startH = w => w.fromH ?? NIGHT_FROM; // giờ bắt đầu canh, đổi được bằng /theo ... 14h
+const inNight = (w, f) => f.date === w.date ? f.hour >= startH(w) : f.hour < NIGHT_TO;
 const ddmm = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7);
 
 async function search(w, date) {
@@ -123,7 +124,7 @@ function findDeals(w, flights, insights) {
 }
 
 const wLabel = w => (w.night ? '🌙 đêm ' : '') + dayLabel(w.date);
-const nightNote = w => w.night ? ` (${NIGHT_FROM}h tối → ${NIGHT_TO}h sáng hôm sau)` : ' (cả ngày)';
+const nightNote = w => w.night ? ` (${startH(w)}h → ${NIGHT_TO}h sáng hôm sau)` : ' (cả ngày)';
 const depLabel = (w, f) => f.dep + (f.date !== w.date ? ` ngày ${ddmm(f.date)}` : '');
 function dealMsg(w, d, googleLow) {
   const { f, reasons } = d;
@@ -172,6 +173,7 @@ async function check(state, w, { force = false, reply = null } = {}) {
 // ---------- lệnh Telegram ----------
 const HELP = `Mình là bot canh vé rẻ ✈️\n\n` +
   `<b>/theo SGN HAN 04/12</b> — canh chuyến ĐÊM TP.HCM → Hà Nội: từ 19h tối 04/12 đến 6h sáng 05/12\n` +
+  `<b>/theo SGN HAN 04/12 14h</b> — canh từ 14h chiều 04/12 đến 6h sáng 05/12\n` +
   `<b>/theo SGN HAN 04/12 cangay</b> — canh cả ngày 04/12\n` +
   `<b>/ds</b> — xem các chuyến đang canh\n` +
   `<b>/gia 1</b> — tra giá ngay chuyến số 1\n` +
@@ -203,8 +205,11 @@ async function handle(state, msg) {
     if (!from || !to || !date || from === to) return send(chat, 'Cú pháp: <b>/theo SGN HAN 04/12</b>\n(mã sân bay đi, mã sân bay đến, ngày). Gõ /sanbay để xem mã.');
     if (date < todayVN()) return send(chat, 'Ngày này đã qua rồi.');
     if (state.watches.some(w => w.from === from && w.to === to && w.date === date)) return send(chat, 'Chuyến này đang được canh rồi.');
-    const night = !/^(ca|cả)?\s*(ngay|ngày)$/i.test((a.slice(3).join('') || '').normalize('NFC'));
-    const w = { id: state.nextId++, from, to, date, night, hist: {}, alerted: {}, lastCheck: 0 };
+    const rest = a.slice(3).join(' ').normalize('NFC');
+    const night = !/(ca|cả)?\s*(ngay|ngày)/i.test(rest);
+    const hm = rest.match(/(\d{1,2})\s*h/i);
+    const fromH = hm && Number(hm[1]) < 24 ? Number(hm[1]) : undefined;
+    const w = { id: state.nextId++, from, to, date, night, fromH, hist: {}, alerted: {}, lastCheck: 0 };
     state.watches.push(w);
     await send(chat, `✅ Bắt đầu canh <b>${from} (${AIRPORTS[from]}) → ${to} (${AIRPORTS[to]})</b> ${wLabel(w)}${nightNote(w)}.\nKhoảng ${fmtH(intervalHours(state))} tiếng tra giá một lần. Đang tra lần đầu...`);
     return check(state, w, { reply: chat });
@@ -237,7 +242,7 @@ function intervalHours(state) {
   const monthEnd = Date.UTC(v.getUTCFullYear(), v.getUTCMonth() + 1, 1) - 7 * 3600e3; // 0h ngày 1 tháng sau, giờ VN
   let need = 0; // tổng (số lượt mỗi lần tra × số giờ còn phải canh)
   for (const w of state.watches) {
-    const end = Date.parse(w.date + 'T00:00:00Z') - 7 * 3600e3 + (w.night ? NIGHT_FROM - 1 : 0) * 3600e3;
+    const end = Date.parse(w.date + 'T00:00:00Z') - 7 * 3600e3 + (w.night ? startH(w) - 1 : 0) * 3600e3;
     const hours = Math.max(0, Math.min(end, monthEnd) - NOW) / 3600e3;
     need += (w.night && w.d2Has !== false ? 2 : 1) * hours;
   }
