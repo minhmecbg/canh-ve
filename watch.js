@@ -5,7 +5,7 @@
 //   SERPAPI_KEY         key SerpApi (bắt buộc)
 //   DROP_PERCENT        rẻ hơn bình thường bao nhiêu % thì báo (mặc định 20)
 //   MONTHLY_LIMIT       số lượt tra giá tối đa mỗi tháng (mặc định 240, gói free là 250)
-//   MIN_HOURS           khoảng cách tối thiểu giữa 2 lần tra một chuyến (mặc định 2)
+//   MIN_HOURS           khoảng cách tối thiểu giữa 2 lần tra một chuyến (mặc định 1)
 //   MOCK=1              chạy thử: giá giả, tin nhắn in ra màn hình
 'use strict';
 const fs = require('fs');
@@ -18,7 +18,7 @@ const TG = ENV.TELEGRAM_BOT_TOKEN || '';
 const SERP = ENV.SERPAPI_KEY || '';
 const DROP = Number(ENV.DROP_PERCENT || 20) / 100;
 const LIMIT = Number(ENV.MONTHLY_LIMIT || 240);
-const MIN_HOURS = Number(ENV.MIN_HOURS || 2);
+const MIN_HOURS = Number(ENV.MIN_HOURS || 1);
 const NOW = MOCK && ENV.MOCK_NOW ? Number(ENV.MOCK_NOW) : Date.now();
 
 const AIRPORTS = {
@@ -206,7 +206,7 @@ async function handle(state, msg) {
     const night = !/^(ca|cả)?\s*(ngay|ngày)$/i.test((a.slice(3).join('') || '').normalize('NFC'));
     const w = { id: state.nextId++, from, to, date, night, hist: {}, alerted: {}, lastCheck: 0 };
     state.watches.push(w);
-    await send(chat, `✅ Bắt đầu canh <b>${from} (${AIRPORTS[from]}) → ${to} (${AIRPORTS[to]})</b> ${wLabel(w)}${nightNote(w)}.\nKhoảng ${intervalHours(state)} tiếng tra giá một lần. Đang tra lần đầu...`);
+    await send(chat, `✅ Bắt đầu canh <b>${from} (${AIRPORTS[from]}) → ${to} (${AIRPORTS[to]})</b> ${wLabel(w)}${nightNote(w)}.\nKhoảng ${fmtH(intervalHours(state))} tiếng tra giá một lần. Đang tra lần đầu...`);
     return check(state, w, { reply: chat });
   }
   if (c === '/ds') {
@@ -215,7 +215,7 @@ async function handle(state, msg) {
       const last = Object.values(w.hist).map(h => h.at(-1)).filter(p => p && p[0] === w.lastCheck).map(p => p[1]);
       return `<b>${w.id}.</b> ${w.from} → ${w.to} · ${wLabel(w)}` + (last.length ? ` · rẻ nhất ${vnd(Math.min(...last))}` : '');
     });
-    return send(chat, `Đang canh:\n${lines.join('\n')}\n\nĐã dùng ${state.usage.count}/${LIMIT} lượt tra tháng này, ~${intervalHours(state)} tiếng tra một lần.`);
+    return send(chat, `Đang canh:\n${lines.join('\n')}\n\nĐã dùng ${state.usage.count}/${LIMIT} lượt tra tháng này, ~${fmtH(intervalHours(state))} tiếng tra một lần.`);
   }
   if (c === '/gia' || c === '/xoa') {
     const w = state.watches.find(x => x.id === Number(a[0]));
@@ -228,10 +228,23 @@ async function handle(state, msg) {
 }
 
 // Chia đều số lượt tra trong tháng cho các chuyến đang canh
+// Dùng hết số lượt còn lại trong tháng: mỗi chuyến chỉ cần canh đến trước giờ bay, nên chia
+// số lượt còn lại cho đúng khoảng thời gian còn phải canh (giữ lại 15% cho /gia và chuyến mới).
 function intervalHours(state) {
-  const n = Math.max(1, state.watches.reduce((s, w) => s + (w.night && w.d2Has !== false ? 2 : 1), 0));
-  return Math.max(MIN_HOURS, Math.ceil((n * 30 * 24) / LIMIT));
+  const used = state.usage.month === monthVN() ? state.usage.count : 0;
+  const left = Math.max(1, (LIMIT - used) * 0.85);
+  const v = vnNow();
+  const monthEnd = Date.UTC(v.getUTCFullYear(), v.getUTCMonth() + 1, 1) - 7 * 3600e3; // 0h ngày 1 tháng sau, giờ VN
+  let need = 0; // tổng (số lượt mỗi lần tra × số giờ còn phải canh)
+  for (const w of state.watches) {
+    const end = Date.parse(w.date + 'T00:00:00Z') - 7 * 3600e3 + (w.night ? NIGHT_FROM - 1 : 0) * 3600e3;
+    const hours = Math.max(0, Math.min(end, monthEnd) - NOW) / 3600e3;
+    need += (w.night && w.d2Has !== false ? 2 : 1) * hours;
+  }
+  if (!need) return MIN_HOURS;
+  return Math.max(MIN_HOURS, Math.ceil((need / left) * 2) / 2); // làm tròn lên nửa tiếng
 }
+const fmtH = h => String(h).replace('.', ',');
 
 async function main() {
   if (!MOCK && (!TG || !SERP)) { console.error('Thiếu TELEGRAM_BOT_TOKEN hoặc SERPAPI_KEY'); process.exit(1); }
