@@ -2,7 +2,7 @@ name: Canh vé rẻ
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # mỗi 30 phút: đọc lệnh Telegram, tra giá chuyến đến hạn
+    - cron: "11,41 * * * *"  # mỗi 30 phút, tránh phút 0 và 30 vì GitHub hay bỏ lượt giờ chẵn: đọc lệnh Telegram, tra giá chuyến đến hạn
   workflow_dispatch:
   push:                       # chạy ngay khi cập nhật code
     branches: [main]

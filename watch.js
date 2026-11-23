@@ -144,6 +144,27 @@ function summary(w, flights, insights) {
   return s + `\n\n<a href="${gLink(w)}">Mở Google Flights</a>`;
 }
 
+const NEWLOW = Number(ENV.NEWLOW_PERCENT || 3) / 100;
+const lowestSeen = w => { let m = null; for (const h of Object.values(w.hist)) for (const [, p] of h) if (m === null || p < m) m = p; return m; };
+// Giá rẻ nhất ở lần tra gần mốc thời gian t nhất (để so với hôm qua)
+function lowestAt(w, t) {
+  const by = {};
+  for (const h of Object.values(w.hist)) for (const [ts, p] of h) by[ts] = Math.min(by[ts] ?? Infinity, p);
+  const ts = Object.keys(by).map(Number).filter(x => x <= t).sort((a, b) => b - a)[0];
+  return ts ? by[ts] : null;
+}
+
+// Tin tóm tắt mỗi sáng (sau 8h) cho từng chuyến đang canh, không tốn lượt tra
+function dailyMsg(w) {
+  const now = w.top[0].price, low = lowestSeen(w), y = lowestAt(w, NOW - 22 * 3600e3);
+  const days = Math.ceil((Date.parse(w.date + 'T00:00:00Z') - 7 * 3600e3 - NOW) / 86400e3);
+  let trend = '';
+  if (y) trend = now < y ? `📉 giảm ${vnd(y - now)} so với hôm qua` : now > y ? `📈 tăng ${vnd(now - y)} so với hôm qua` : '➖ không đổi so với hôm qua';
+  return `☀️ <b>Tóm tắt sáng · ${w.from} → ${w.to}</b> · ${wLabel(w)}${nightNote(w)}\nCòn ${days} ngày nữa bay.\n\n` +
+    `Rẻ nhất hiện tại:\n` + w.top.map(f => `${depLabel(w, f)} ${esc(f.airline)} ${esc(f.fn)}: <b>${vnd(f.price)}</b>`).join('\n') +
+    `\n\n${trend}${trend ? '\n' : ''}Thấp nhất từng thấy: ${vnd(low)}\n<a href="${gLink(w)}">Mở Google Flights</a>`;
+}
+
 async function check(state, w, { force = false, reply = null } = {}) {
   if (state.usage.month !== monthVN()) state.usage = { month: monthVN(), count: 0 };
   if (state.usage.count >= LIMIT) { if (reply) await send(reply, `Tháng này đã dùng hết ${LIMIT} lượt tra giá. Đầu tháng sau app tự chạy lại.`); return; }
@@ -165,6 +186,17 @@ async function check(state, w, { force = false, reply = null } = {}) {
   w.lastCheck = NOW;
   const { deals, googleLow } = findDeals(w, flights, res.price_insights);
   for (const d of deals) { await send(state.owner, dealMsg(w, d, googleLow)); w.alerted[d.f.key] = d.f.price; }
+  // Báo khi giá rẻ nhất xuống mức thấp mới (thấp hơn mọi lần tra trước ít nhất NEWLOW_PERCENT),
+  // kể cả khi chưa xuống dưới giá thường của Google.
+  const prevLow = lowestSeen(w);
+  const best = flights[0];
+  if (best && prevLow && best.price <= prevLow * (1 - NEWLOW) && !deals.some(d => d.f === best)) {
+    await send(state.owner, `📉 <b>GIÁ GIẢM: ${w.from} → ${w.to}</b> · ${wLabel(w)}\n` +
+      `✈️ ${esc(best.airline)} ${esc(best.fn)} · ${depLabel(w, best)} → ${best.arr}\n` +
+      `💰 <b>${vnd(best.price)}</b> (thấp nhất từ trước tới giờ là ${vnd(prevLow)}, giảm ${Math.round((1 - best.price / prevLow) * 100)}%)\n\n` +
+      `👉 <a href="${gLink(w, best.date)}">Mở Google Flights</a>`);
+  }
+  w.top = flights.slice(0, 3).map(f => ({ fn: f.fn, airline: f.airline, dep: f.dep, arr: f.arr, date: f.date, price: f.price }));
   for (const f of flights) { (w.hist[f.key] = w.hist[f.key] || []).push([NOW, f.price]); w.hist[f.key] = w.hist[f.key].slice(-60); }
   if (reply) await send(reply, summary(w, flights, res.price_insights));
   console.log(`Đã tra #${w.id} ${w.from}-${w.to} ${w.date}: ${flights.length} chuyến, ${deals.length} vé rẻ`);
@@ -269,6 +301,10 @@ async function main() {
   // 3) tra giá các chuyến đến hạn
   const every = intervalHours(state) * 3600e3;
   for (const w of state.watches) if (NOW - (w.lastCheck || 0) >= every - 5 * 60e3) await check(state, w);
+  // 4) tóm tắt mỗi sáng
+  if (state.owner && vnNow().getUTCHours() >= 8)
+    for (const w of state.watches) if (w.top && w.top.length && w.daily !== todayVN()) { await send(state.owner, dailyMsg(w)); w.daily = todayVN(); }
+  state.runs = [...(state.runs || []), NOW].slice(-48); // để kiểm tra GitHub có chạy đúng lịch không
   saveState(state);
 }
 
